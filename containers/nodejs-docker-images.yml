@@ -1,0 +1,54 @@
+# This is our common script to build and push docker images into container registry
+parameters:
+  VM_IMAGE: "ubuntu-latest"
+  IMAGE_REPOSITORY: ""
+  DOCKER_REGISTRY_SERVICE_CONNECTION: ""
+  AZURE_CONTAINER_REGISTRY: ""
+  DOCKER_FILE_PATH: ""
+  PAT: ""
+steps:
+  - task: gitversion/setup@0
+    displayName: Install GitVersion
+    inputs:
+      versionSpec: "5.x"
+  - task: gitversion/execute@0
+    displayName: "GitVersion"
+    inputs:
+      useConfigFile: true
+      configFilePath: "GitVersion.yml"
+      preferBundledVersion: false
+
+  - powershell: echo "##vso[task.setvariable variable=imageVersion;isOutput=true]$(GitVersion.SemVer)"
+    name: setversion
+
+  - task: DockerInstaller@0
+    displayName: "Docker Installer"
+    inputs:
+      dockerVersion: 17.09.0-ce
+      releaseType: stable
+
+  - task: Docker@2
+    displayName: "Build image ${{parameters.AZURE_CONTAINER_REGISTRY}}/${{parameters.IMAGE_REPOSITORY}}:$(GitVersion.SemVer)"
+    inputs:
+      containerRegistry: "${{parameters.DOCKER_REGISTRY_SERVICE_CONNECTION}}"
+      repository: "${{parameters.IMAGE_REPOSITORY}}"
+      command: "build"
+      arguments: --build-arg pat="${{parameters.PAT}}"
+      Dockerfile: "$(Build.Repository.LocalPath)/${{parameters.DOCKER_FILE_PATH}}/Dockerfile"
+      buildContext: "$(Build.Repository.LocalPath)/${{parameters.DOCKER_FILE_PATH}}"
+      tags: |
+        $(GitVersion.SemVer)
+        latest
+
+  - task: Docker@2
+    displayName: "Push image ${{parameters.AZURE_CONTAINER_REGISTRY}}/${{parameters.IMAGE_REPOSITORY}}:$(GitVersion.SemVer)"
+    inputs:
+      containerRegistry: "${{parameters.DOCKER_REGISTRY_SERVICE_CONNECTION}}"
+      repository: "${{parameters.IMAGE_REPOSITORY}}"
+      command: "push"
+      tags: |
+        $(GitVersion.SemVer)
+        latest
+
+  - upload: manifests
+    artifact: manifests

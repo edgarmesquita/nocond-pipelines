@@ -1,0 +1,56 @@
+# This is our common script to build libraries into consumable packages
+# Some setup is required for these packages
+
+# Package metadata need to be set in the .csproj
+# Package versioning relies on GitVersion
+# Source and project layout follows convention
+parameters:
+  VM_IMAGE: "ubuntu-latest"
+  NPM_FOLDER: "./"
+
+steps:
+  - task: gitversion/setup@0
+    displayName: Install GitVersion
+    inputs:
+      versionSpec: "5.x"
+  - task: gitversion/execute@0
+    displayName: "GitVersion"
+    inputs:
+      useConfigFile: true
+      configFilePath: "GitVersion.yml"
+      preferBundledVersion: false
+
+  - task: YarnInstaller@3
+    displayName: "Install Yarn"
+    inputs:
+      versionSpec: "1.x"
+      workingDir: ${{ parameters.NPM_FOLDER }}
+
+  - task: Yarn@3
+    displayName: "Install Dependencies"
+    inputs:
+      arguments: "install"
+      customRegistry: "useFeed"
+      customFeed: "NoCond/NoCond"
+      workingDir: ${{ parameters.NPM_FOLDER }}
+
+  - task: Yarn@3
+    displayName: "Version"
+    inputs:
+      arguments: "--cwd ${{ parameters.NPM_FOLDER }} version --new-version $(GitVersion.SemVer) --no-git-tag-version"
+      workingDir: ${{ parameters.NPM_FOLDER }}
+
+  - task: Yarn@3
+    displayName: "Build"
+    inputs:
+      arguments: "build"
+      workingDir: ${{ parameters.NPM_FOLDER }}
+
+  - task: Npm@1
+    displayName: "Publish Npm Packages"
+    inputs:
+      command: "custom"
+      customCommand: "publish"
+      customRegistry: "useFeed"
+      customFeed: "NoCond/NoCond"
+      workingDir: ${{ parameters.NPM_FOLDER }}

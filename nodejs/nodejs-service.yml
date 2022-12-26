@@ -1,0 +1,63 @@
+# This is our common script to build libraries into consumable packages
+# Some setup is required for these packages
+
+# Package metadata need to be set in the .csproj
+# Package versioning relies on GitVersion
+# Source and project layout follows convention
+
+parameters:
+  VM_IMAGE: "ubuntu-latest"
+  IMAGE_REPOSITORY: ""
+  IMAGE_REPOSITORY_EXACT: ""
+  AZURE_SERVICE_CONNECTION_ID: ""
+  ACR_NAME: ""
+  DOCKER_FILE_PATH: ""
+  CONFIG_FILE_LOCATION: ""
+  KEY_VAULT_NAME: ""
+  CPU: "Any CPU"
+  PAT: ""
+
+jobs:
+  - job: Build
+    displayName: "Build React app Service"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+    steps:
+      - checkout: self
+        persistCredentials: true
+        clean: true
+
+      - task: YarnInstaller@3
+        displayName: "Install Yarn"
+        inputs:
+          versionSpec: "1.x"
+
+      - task: Yarn@3
+        displayName: "Install Dependencies"
+        inputs:
+          arguments: "install"
+          customRegistry: "useFeed"
+          customFeed: "NoCond/NoCond@Local"
+
+      - task: Yarn@3
+        displayName: "Build"
+        inputs:
+          arguments: "build" # Includes type checks
+
+  - job: Build_Containers
+    displayName: "Build and Push docker container"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+    dependsOn: Build
+    condition: succeeded()
+    steps:
+      - template: ../containers/nodejs-docker-images.yml
+        parameters:
+          VM_IMAGE: ${{ parameters.VM_IMAGE }}
+          IMAGE_REPOSITORY: ${{ parameters.IMAGE_REPOSITORY }}
+          DOCKER_REGISTRY_SERVICE_CONNECTION: ${{ parameters.DOCKER_REGISTRY_SERVICE_CONNECTION }}
+          AZURE_CONTAINER_REGISTRY: ${{ parameters.AZURE_CONTAINER_REGISTRY }}
+          DOCKER_FILE_PATH: ${{ parameters.DOCKER_FILE_PATH }}
+          PAT: ${{ parameters.PAT }}

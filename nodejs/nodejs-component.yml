@@ -1,0 +1,51 @@
+# This is our common script to build libraries into consumable packages
+# Some setup is required for these packages
+
+# Package metadata need to be set in the .csproj
+# Package versioning relies on GitVersion
+# Source and project layout follows convention
+
+parameters:
+  VM_IMAGE: "ubuntu-latest"
+  CPU: "Any CPU"
+  PUBLISH_NPM_PACKAGES: false
+
+jobs:
+  - job: Build
+    displayName: "Build React app Service"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+    steps:
+      - checkout: self
+        persistCredentials: true
+        clean: true
+
+      - task: YarnInstaller@3
+        displayName: "Install Yarn"
+        inputs:
+          versionSpec: "1.x"
+
+      - task: Yarn@3
+        displayName: "Install Dependencies"
+        inputs:
+          arguments: "install"
+          customRegistry: "useFeed"
+          customFeed: "NoCond/NoCond@Local"
+
+      - task: Yarn@3
+        displayName: "Build"
+        inputs:
+          arguments: "build" # Includes type checks
+
+  - job: Publish_NPM_Packages
+    displayName: "Publish npm packages"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), eq('${{ parameters.PUBLISH_NPM_PACKAGES }}', 'true'))
+    steps:
+      - template: npm-package.yml
+        parameters:
+          VM_IMAGE: ${{ parameters.VM_IMAGE }}

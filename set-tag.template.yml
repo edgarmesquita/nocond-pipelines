@@ -1,0 +1,42 @@
+parameters:
+  - name: overwrite_existing_tag
+    type: boolean
+    default: false
+  - name: git_tag_prefix
+    type: string
+    default: ""
+
+steps:
+  - task: gitversion/setup@0
+    displayName: Install GitVersion
+    inputs:
+      versionSpec: "5.x"
+  - task: gitversion/execute@0
+    displayName: "GitVersion"
+    inputs:
+      useConfigFile: true
+      configFilePath: "GitVersion.yml"
+      updateAssemblyInfo: false
+      preferBundledVersion: false
+
+  - ${{ if eq(parameters.overwrite_existing_tag, true) }}:
+      - pwsh: |
+          git config --global user.name "AzureDevOps Agent"
+          git tag "${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)" --force
+          git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin "${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)" --force
+          Write-Output "Tagging $(Build.Repository.Name) with ${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)"
+        displayName: set-tag
+
+  - ${{ if eq(parameters.overwrite_existing_tag, false) }}:
+      - pwsh: |
+          git config --global user.name "AzureDevOps Agent"
+          if (git tag | select-string "${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)") {
+            Write-Output "tag already exists for ${{ parameters.git_tag_prefix }}$(GitVersion.SemVer).  Set overwrite_existing_tag to true if you want to override it"
+            exit 1
+          }
+          else {
+            git tag "${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)"
+            git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)"  push origin "${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)"
+            Write-Output "Tagging $(Build.Repository.Name) with ${{ parameters.git_tag_prefix }}$(GitVersion.SemVer)"
+          }
+        displayName: set-tag

@@ -1,0 +1,29 @@
+# On merge to master create a new tag
+name: $(BuildDefinitionName).$(DayOfYear)$(Rev:.r)
+
+trigger:
+  branches:
+    # We use all these branches to produce artifacts
+    include:
+      - master
+
+  # Content in these locations can be ignored
+  paths:
+    exclude:
+      - docs/*
+      - "*.md"
+
+stages:
+  - stage: Build
+    displayName: Build - Service
+    dependsOn: []
+    jobs:
+      - job: Build
+        pool:
+          vmImage: "Ubuntu-16.04"
+        steps:
+          # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+          - ${{ if eq(variables['Build.SourceBranchName'], 'master') }}:
+              - template: ./set-tag.template.yml
+                parameters:
+                  overwrite_existing_tag: true

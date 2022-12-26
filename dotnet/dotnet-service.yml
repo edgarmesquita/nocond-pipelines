@@ -1,0 +1,104 @@
+# This is our common script to build libraries into consumable packages
+# Some setup is required for these packages
+
+# Package metadata need to be set in the .csproj
+# Package versioning relies on GitVersion
+# Source and project layout follows convention
+
+parameters:
+  VM_IMAGE: "ubuntu-latest"
+  IMAGE_REPOSITORY: ""
+  IMAGE_REPOSITORY_EXACT: ""
+  AZURE_SERVICE_CONNECTION_ID: ""
+  ACR_NAME: ""
+  DOCKER_FILE_PATH: ""
+  # This is your project name, and path, within `src`, no spaces
+  PROJECT_NAME: ""
+  CONFIG_FILE_LOCATION: ""
+  KEY_VAULT_NAME: ""
+  CPU: "Any CPU"
+  NPM_PACKAGE: false
+  NPM_FOLDER: "./"
+  PAT: ""
+
+jobs:
+  - job: Build
+    displayName: "Build Dotnet Core Service"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+
+    # these variables are available throughout the build file
+    variables:
+      TreatWarningsAsErrors: true
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      BuildConfiguration: Release
+      BuildPlatform: ${{ parameters.CPU }}
+    steps:
+      - task: gitversion/setup@0
+        displayName: Install GitVersion
+        inputs:
+          versionSpec: "5.x"
+      - task: gitversion/execute@0
+        displayName: "GitVersion"
+        inputs:
+          useConfigFile: true
+          configFilePath: "GitVersion.yml"
+          preferBundledVersion: false
+      - task: NuGetCommand@2
+        displayName: "Auth with Artifacts"
+        inputs:
+          command: custom
+          arguments: sources update -Name "Azure DevOps" -Username "vsts" -Password "$(System.AccessToken)" -StorePasswordInClearText -ConfigFile ./NuGet.config
+      - task: DotNetCoreCLI@2
+        displayName: "dotnet build"
+        inputs:
+          command: "build"
+          arguments: --configuration $(buildConfiguration) /p:Version="$(GitVersion.NuGetVersion)" /p:AssemblyVersion="$(GitVersion.AssemblySemVer)" /p:PackageVersion="$(GitVersion.NuGetVersion)"
+
+      - task: DotNetCoreCLI@2
+        displayName: dotnet test
+        inputs:
+          command: test
+          arguments: -c $(BuildConfiguration) --filter "TestCategory!=FailsInCloudTest" /p:CoverletOutput=$(agent.TempDirectory)/CoverageResults/ /p:MergeWith=$(agent.TempDirectory)/CoverageResults/coverage.json "/p:CoverletOutputFormat=\"opencover,json\"" /p:CollectCoverage=true  /p:Version="$(GitVersion.AssemblySemVer)" -m:1
+          testRunTitle: ${{ parameters.PROJECT_NAME }}-$(Agent.JobName)
+          nobuild: true
+
+      - task: CopyFiles@2
+        displayName: "Copy test results"
+        inputs:
+          SourceFolder: "$(agent.TempDirectory)"
+          Contents: "**"
+          TargetFolder: "$(Common.TestResultsDirectory)"
+
+  - job: Publish_NPM_Packages
+
+    displayName: "Publish npm packages"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), eq('${{ parameters.NPM_PACKAGE }}', 'true'))
+    steps:
+      - template: ../nodejs/npm-package.yml
+        parameters:
+          VM_IMAGE: ${{ parameters.VM_IMAGE }}
+          NPM_FOLDER: ${{ parameters.NPM_FOLDER }}
+
+  - job: Build_Containers
+    displayName: "Build and Push docker container"
+    # the build will run on a Microsoft hosted agent, using the image specified by the parameter
+    pool:
+      vmImage: ${{ parameters.VM_IMAGE }}
+    dependsOn: Build
+    condition: succeeded()
+    steps:
+      - template: ../containers/docker-images.yml
+        parameters:
+          VM_IMAGE: ${{ parameters.VM_IMAGE }}
+          IMAGE_REPOSITORY: ${{ parameters.IMAGE_REPOSITORY }}
+          DOCKER_REGISTRY_SERVICE_CONNECTION: ${{ parameters.DOCKER_REGISTRY_SERVICE_CONNECTION }}
+          AZURE_CONTAINER_REGISTRY: ${{ parameters.AZURE_CONTAINER_REGISTRY }}
+          DOCKER_FILE_PATH: ${{ parameters.DOCKER_FILE_PATH }}
+          PAT: ${{ parameters.PAT }}
